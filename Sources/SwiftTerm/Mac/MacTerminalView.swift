@@ -483,6 +483,14 @@ open class TerminalView: NSView, NSUserInterfaceValidations, TerminalDelegate {
     var cellDimension: CellDimension!
     /// The backing scale `cellDimension` was snapped to; see `computeFontDimensions`.
     var cellDimensionBackingScale: CGFloat = 1
+
+    /// The size of one cell, so a client can draw over the grid.
+    ///
+    /// TerminalProX: command-block gutters, Find outlines and delta highlights are drawn in overlays that have
+    /// to land on exactly the cells this view draws, so they use its own measurement rather than a second one.
+    public var cellSize: CGSize {
+        CGSize(width: cellDimension.width, height: cellDimension.height)
+    }
     var caretView: CaretView!
     var _fontSmoothing: Bool = true
     var _lineSpacing: CGFloat = 1.0
@@ -1913,7 +1921,8 @@ open class TerminalView: NSView, NSUserInterfaceValidations, TerminalDelegate {
     //
     // NSTextInputClient protocol implementation
     //
-    public override func becomeFirstResponder() -> Bool {
+    // TerminalProX: open, so a subclass can hear focus arrive (panes light up and route input by it).
+    open override func becomeFirstResponder() -> Bool {
         let response = super.becomeFirstResponder()
         if response {
             hasFocus = true
@@ -1922,7 +1931,8 @@ open class TerminalView: NSView, NSUserInterfaceValidations, TerminalDelegate {
         return response
     }
     
-    public override func resignFirstResponder() -> Bool {
+    // TerminalProX: open, so a subclass can hear focus leave.
+    open override func resignFirstResponder() -> Bool {
         let response = super.resignFirstResponder()
         if response {
             caretView.disableAnimations()
