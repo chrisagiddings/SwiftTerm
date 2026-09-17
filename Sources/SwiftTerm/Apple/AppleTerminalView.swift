@@ -1610,7 +1610,12 @@ extension TerminalView {
     /// The closure must not call another API that synchronously acquires the
     /// terminal lock. Helpers that assume the lock is held use the `Locked`
     /// suffix and assert that contract in DEBUG builds.
-    func withTerminal<T> (_ body: (Terminal) throws -> T, caller: StaticString = #function) rethrows -> T
+    ///
+    /// TerminalProX: public. The app reads scrollback rows, the cursor and
+    /// semantic prompt state for command blocks, Find and delta highlights;
+    /// the snapshot APIs copy the visible rows only. Reading through the lock
+    /// keeps those reads safe against the parser running on another thread.
+    public func withTerminal<T> (_ body: (Terminal) throws -> T, caller: StaticString = #function) rethrows -> T
     {
         if ProfilingStats.enabled && Thread.isMainThread {
             ProfilingLockCallers.shared.record(caller)
