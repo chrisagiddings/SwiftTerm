@@ -93,6 +93,11 @@ public class PseudoTerminalHelpers {
             }
         }
 
+        // Worked out before fork, like the signal state below: the child
+        // closes every descriptor from 3 up to this before execve, so the
+        // program starts with its terminal and nothing else of the host's.
+        let descriptorBound = inheritedDescriptorBound()
+
         // Build the signal state before fork. The child must use only
         // async-signal-safe system calls until execve.
         var defaultAction = sigaction()
@@ -133,13 +138,52 @@ public class PseudoTerminalHelpers {
             if let cCurrentDirectory {
                 _ = chdir(cCurrentDirectory)
             }
-            
+            // A descriptor the host opened without close-on-exec would
+            // otherwise reach the program: a pipe the host is reading (the
+            // program could consume its data), or one it is writing (the
+            // host never sees end-of-file while the program lives). forkpty
+            // has made 0, 1 and 2 the terminal; close(2) is
+            // async-signal-safe and the loop allocates nothing.
+            var descriptor: Int32 = 3
+            while descriptor < descriptorBound {
+                _ = close(descriptor)
+                descriptor += 1
+            }
+
             _ = execve(cExecutable, cArgs.base, cEnv.base)
             _exit(127)
         }
         return (pid, master)
     }
     
+    /// One past the highest descriptor the child might have inherited: the
+    /// soft descriptor limit, capped so an unlimited limit does not mean
+    /// billions of close calls, and never below the highest descriptor open
+    /// now (with room for any another thread opens before the fork).
+    static func inheritedDescriptorBound() -> Int32 {
+        let cap: Int64 = 65_536
+        var limit = rlimit()
+        var bound: Int64 = 1_024
+        if getrlimit(RLIMIT_NOFILE, &limit) == 0 {
+            // An unlimited limit is the largest rlim_t, which the cap takes care of.
+            bound = min(Int64(clamping: limit.rlim_cur), cap)
+        }
+#if os(macOS)
+        let stride = MemoryLayout<proc_fdinfo>.stride
+        let bytes = proc_pidinfo(getpid(), PROC_PIDLISTFDS, 0, nil, 0)
+        if bytes > 0 {
+            var entries = [proc_fdinfo](repeating: proc_fdinfo(), count: Int(bytes) / stride + 64)
+            let filled = entries.withUnsafeMutableBytes { buffer in
+                proc_pidinfo(getpid(), PROC_PIDLISTFDS, 0, buffer.baseAddress, Int32(buffer.count))
+            }
+            if let highest = entries.prefix(Int(max(filled, 0)) / stride).map({ Int64($0.proc_fd) }).max() {
+                bound = max(bound, highest + 256)
+            }
+        }
+#endif
+        return Int32(clamping: bound)
+    }
+
     /**
      * Sets the window size of the underlying pseudo terminal.
      * - Parameter masterPtyDescriptor: a pseudo-terminal master file descriptor, as returned by fork(andExec:)
